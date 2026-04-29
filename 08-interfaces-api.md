@@ -1,0 +1,270 @@
+## §8 — Interfaces & contrats d'API
+
+### Tableau synoptique des endpoints REST
+
+Toutes les routes sont préfixées par `/api/v1/`. La colonne « Auth » précise la matière d'authentification exigée : `Public` (aucune), `JWT` (jeton d'accès porteur signé RS256), `JWT + role:organizer`, `JWT + role:admin`, ou `HMAC` (signature `Stripe-Signature` vérifiée côté serveur). La colonne « Codes retour » liste les statuts HTTP attendus pour les cas nominaux et les erreurs métier les plus structurantes (au-delà des erreurs techniques 5xx, qui font l'objet d'un traitement transverse en § 8.2).
+
+| Méthode | Chemin                                              | Description                                                       | Auth                       | Codes retour                              | Dépendances aval                                  |
+|---------|-----------------------------------------------------|-------------------------------------------------------------------|----------------------------|-------------------------------------------|---------------------------------------------------|
+| POST    | /api/v1/auth/oidc/callback                          | Callback du flux OpenID Connect, échange du code contre un JWT    | Public                     | 200, 400, 401, 502                        | IdentityProvider (OIDC), UserService              |
+| POST    | /api/v1/auth/refresh                                | Échange un refresh token contre une nouvelle paire de jetons      | Public (cookie HttpOnly)   | 200, 401, 403                             | AuthService, Redis (rotation)                     |
+| POST    | /api/v1/auth/logout                                 | Révoque le refresh token courant                                  | JWT                        | 204, 401                                  | AuthService, Redis                                |
+| GET     | /api/v1/events                                      | Liste paginée des événements publiés                              | Public                     | 200, 400                                  | EventService, Redis (cache)                       |
+| GET     | /api/v1/events/search                               | Recherche plein texte + filtres (catégorie, date, lieu)           | Public                     | 200, 400                                  | EventService, Redis (cache)                       |
+| GET     | /api/v1/events/{eventId}                            | Détail d'un événement publié                                      | Public                     | 200, 404                                  | EventService                                      |
+| POST    | /api/v1/events                                      | Création d'un événement (statut `draft`)                          | JWT + role:organizer       | 201, 400, 401, 403, 422                   | EventService                                      |
+| PATCH   | /api/v1/events/{eventId}                            | Mise à jour d'un événement non publié                             | JWT + role:organizer       | 200, 400, 401, 403, 404, 409, 422         | EventService                                      |
+| POST    | /api/v1/events/{eventId}/publish                    | Publication de l'événement                                        | JWT + role:organizer       | 200, 401, 403, 404, 409, 422              | EventService                                      |
+| POST    | /api/v1/events/{eventId}/cancel                     | Annulation d'un événement déjà publié                             | JWT + role:organizer       | 202, 401, 403, 404, 409                   | EventService, RabbitMQ (`event.cancelled`)        |
+| POST    | /api/v1/events/{eventId}/tickets                    | Création d'une réservation (billet `reserved`)                    | JWT                        | 201, 400, 401, 403, 404, 409, 422         | TicketService, EventService, RabbitMQ             |
+| GET     | /api/v1/tickets                                     | Liste des billets de l'utilisateur courant                        | JWT                        | 200, 401                                  | TicketService                                     |
+| GET     | /api/v1/tickets/{ticketId}                          | Détail d'un billet (incluant statut)                              | JWT                        | 200, 401, 403, 404                        | TicketService                                     |
+| DELETE  | /api/v1/tickets/{ticketId}                          | Annulation d'un billet par son détenteur                          | JWT                        | 204, 401, 403, 404, 409                   | TicketService, PaymentService                     |
+| POST    | /api/v1/tickets/{ticketId}/payment-intent           | Initiation d'un paiement Stripe pour un billet `reserved`         | JWT                        | 200, 401, 403, 404, 409, 422              | PaymentService, Stripe                            |
+| POST    | /api/v1/payments/webhook                            | Réception des événements Stripe (PaymentIntent.*)                 | HMAC (Stripe-Signature)    | 200, 400, 401                             | PaymentService, RabbitMQ (`ticket.confirmed`, `payment.failed`) |
+| GET     | /api/v1/organizer/events                            | Tableau de bord — événements organisés par l'utilisateur courant  | JWT + role:organizer       | 200, 401, 403                             | EventService, AnalyticsService                    |
+| GET     | /api/v1/organizer/events/{eventId}/participants     | Liste paginée des participants d'un événement                     | JWT + role:organizer       | 200, 401, 403, 404                        | TicketService                                     |
+| GET     | /api/v1/organizer/events/{eventId}/participants.csv | Export CSV des participants                                       | JWT + role:organizer       | 200, 401, 403, 404                        | TicketService, S3                                 |
+| GET     | /api/v1/organizer/events/{eventId}/kpis             | Indicateurs de performance (taux de remplissage, CA, no-show)     | JWT + role:organizer       | 200, 401, 403, 404                        | AnalyticsService                                  |
+| POST    | /api/v1/admin/organizers/{organizerId}/validate     | Validation administrative d'un compte organisateur                | JWT + role:admin           | 200, 401, 403, 404, 409                   | OrganizerService, NotificationService             |
+| POST    | /api/v1/admin/organizers/{organizerId}/revoke       | Révocation d'un compte organisateur                               | JWT + role:admin           | 200, 401, 403, 404, 409                   | OrganizerService, NotificationService             |
+
+### Conventions transverses
+
+#### Format des erreurs (RFC 7807 Problem Details)
+
+Toutes les réponses d'erreur respectent `application/problem+json` :
+
+```json
+{
+  "type": "https://api.supevents.fr/errors/ticket-conflict",
+  "title": "Ticket already exists for this event",
+  "status": 409,
+  "detail": "User 9f1c… already holds an active ticket for event b73a….",
+  "instance": "/api/v1/events/b73a…/tickets",
+  "code": "TICKET_DUPLICATE",
+  "traceId": "0e2f8b…"
+}
+```
+
+Le champ `code` est stable et documenté dans le catalogue d'erreurs (§ 8.4). Le `traceId` correspond à l'identifiant W3C `traceparent` propagé par OpenTelemetry, ce qui permet le rapprochement avec les journaux applicatifs.
+
+#### Stratégie de versioning
+
+- Versioning par segment d'URL : `/api/v1/`, `/api/v2/`. Les versions cohabitent au minimum 6 mois après l'annonce de dépréciation.
+- En-tête `Sunset` (RFC 8594) renvoyé sur les routes dépréciées avec la date d'arrêt.
+- Les changements rétro-incompatibles déclenchent une nouvelle version. L'ajout de champs facultatifs reste rétro-compatible.
+
+#### Rate limiting et quotas
+
+- Quota par défaut : 60 requêtes / minute / IP pour les routes publiques, 600 / minute / utilisateur authentifié.
+- En-têtes de réponse normalisés : `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset`.
+- Dépassement : code 429 + `Problem Details` (`code: "RATE_LIMITED"`) + en-tête `Retry-After`.
+- Les routes coûteuses (`/events/search`, `/organizer/.../participants.csv`) ont des quotas dédiés stockés dans Redis (compteurs glissants).
+
+#### Justification des choix d'API structurants
+
+Trois décisions de découpage portent une intention métier qu'OpenAPI ne capture pas et qui méritent d'être explicitées.
+
+- **`POST /events/{eventId}/cancel` plutôt que `PATCH /events/{eventId}` avec `{ status: "cancelled" }`.** L'annulation est une opération métier qui déclenche une cascade : publication d'`event.cancelled`, remboursements automatiques des billets payés, notifications utilisateurs. L'exposer comme une action dédiée rend le contrat lisible (le client sait qu'il s'agit d'une opération asynchrone et coûteuse, code 202), simplifie l'autorisation (politique RBAC dédiée), et empêche le client de tenter une mise à jour partielle qui contournerait la machine à états.
+- **`POST /tickets/{ticketId}/payment-intent` séparé de `POST /events/{eventId}/tickets`.** La réservation et le paiement sont deux opérations distinctes : une réservation peut exister sans paiement (événement gratuit, abandon en cours de tunnel), un paiement n'a de sens qu'en référence à un billet existant. Les fusionner forcerait le client à gérer deux états d'erreur sur un seul appel et empêcherait la reprise de paiement après abandon.
+- **`POST /payments/webhook` exposé en racine et non sous `/payments/{id}/...`.** Stripe pousse les événements sans connaître nos identifiants internes — la résolution se fait sur `stripe_payment_intent_id` côté serveur. Imposer un `id` interne dans l'URL forcerait une indirection inutile et créerait un couplage fragile.
+
+#### Contrats inter-services
+
+Les services internes communiquent via HTTP/gRPC interne ou via RabbitMQ. Les SLA et politiques de résilience suivants sont contractuels — un service consommateur peut s'y appuyer sans demande préalable.
+
+| Appelant                  | Appelé              | Type     | SLA latence p95 | Timeout client | Retry                                  | Circuit breaker                                        |
+|---------------------------|---------------------|----------|-----------------|----------------|----------------------------------------|--------------------------------------------------------|
+| `TicketService`           | `EventService`      | gRPC     | 80 ms           | 500 ms         | 2 retries, backoff 50 ms / 200 ms      | Ouverture si > 50 % d'échec sur 30 s, half-open 10 s   |
+| `TicketService`           | `PaymentService`    | gRPC     | 120 ms          | 800 ms         | 1 retry idempotent                     | Ouverture si > 30 % d'échec sur 30 s                   |
+| `PaymentService`          | Stripe API          | HTTPS    | 400 ms          | 3 s            | 3 retries exponentiels (1 s, 3 s, 9 s) | Bulkhead 20 connexions max ; circuit ouvert 60 s sur 5xx persistants |
+| `NotificationService`     | Provider e-mail     | HTTPS    | 600 ms          | 5 s            | 5 retries exponentiels                 | Bascule provider secondaire après 10 échecs en 60 s    |
+| `OrganizerDashboardService` | `AnalyticsService` | gRPC     | 200 ms          | 1 s            | 1 retry                                | Dégradation gracieuse : KPI cachés Redis (TTL 5 min)   |
+| Tous les producteurs      | RabbitMQ            | AMQP     | 30 ms publish ack | 1 s          | Outbox pattern + republish job 30 s    | Outbox PostgreSQL en cas d'indisponibilité broker      |
+
+Les SLA listés sont les engagements internes ; toute consommation au-delà déclenche une alerte SRE et une revue d'architecture conjointe entre les équipes appelante et appelée.
+
+### Événements asynchrones
+
+Tous les événements métier sont publiés sur RabbitMQ via des exchanges `topic` versionnés. Chaque message porte les en-têtes standards `x-event-id` (UUID), `x-event-name`, `x-event-version`, `x-trace-id`, `x-correlation-id`. Le nom de l'événement est au passé : il décrit un fait observé, pas une intention. Les payloads ne contiennent que des identifiants et des codes de statut — aucun champ marqué « Sensibilité RGPD : Oui » en § 6.4 n'y figure.
+
+#### `ticket.confirmed`
+
+##### Fiche descriptive
+
+| Champ                  | Valeur                                                                                                                                                                                                                                                                                                |
+|------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Nom                    | `ticket.confirmed`                                                                                                                                                                                                                                                                                    |
+| Producteur             | `TicketService` — publié lorsqu'un billet bascule en statut `confirmed`, soit immédiatement pour les événements gratuits, soit à la réception d'un `payment_intent.succeeded` côté webhook Stripe relayé par `PaymentService`.                                                                       |
+| Topic / exchange       | Exchange `tickets.events.v1` (type `topic`) — routing key `ticket.confirmed`.                                                                                                                                                                                                                          |
+| Consommateurs connus   | `NotificationService` (envoie l'e-mail de confirmation + le PDF du billet), `AnalyticsService` (incrément des compteurs taux de remplissage / CA), `OrganizerDashboardService` (rafraîchit la liste des participants en temps réel), `WaitingListService` (no-op ; ignore mais conservé pour audit). |
+| Garantie de livraison  | At-least-once. Les consommateurs sont idempotents via la clé `x-event-id` (déduplication Redis, TTL 7 jours).                                                                                                                                                                                          |
+| Stratégie de retry     | Backoff exponentiel : 1 s, 5 s, 30 s, 2 min, 10 min, 1 h. Maximum 6 tentatives. Au-delà, message routé vers la DLQ `tickets.events.v1.dlq`, alerte SRE déclenchée si le débit dépasse 5 messages / 10 min.                                                                                            |
+
+##### Schéma JSON du payload
+
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "TicketConfirmedEvent",
+  "type": "object",
+  "required": ["eventId", "version", "occurredAt", "ticketId", "userId", "supEventId", "channel", "amountCents", "currency"],
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Identifiant unique du message (clé de déduplication)."
+    },
+    "version": {
+      "type": "string",
+      "const": "1.0",
+      "description": "Version du contrat d'événement."
+    },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Horodatage ISO 8601 du fait observé."
+    },
+    "ticketId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Identifiant du billet confirmé."
+    },
+    "userId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Identifiant du détenteur du billet."
+    },
+    "supEventId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Identifiant de l'événement métier (Event)."
+    },
+    "channel": {
+      "type": "string",
+      "enum": ["free", "paid"],
+      "description": "Voie de confirmation : gratuit ou payé."
+    },
+    "amountCents": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Montant facturé en centimes (0 si gratuit)."
+    },
+    "currency": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$",
+      "description": "Devise ISO 4217."
+    },
+    "paymentId": {
+      "type": ["string", "null"],
+      "format": "uuid",
+      "description": "Identifiant du paiement associé (null si gratuit)."
+    },
+    "correlationId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Corrélation de bout en bout (propagation W3C trace)."
+    }
+  },
+  "additionalProperties": false
+}
+```
+
+#### `payment.failed`
+
+##### Fiche descriptive
+
+| Champ                  | Valeur                                                                                                                                                                                                                                                                                          |
+|------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Nom                    | `payment.failed`                                                                                                                                                                                                                                                                                |
+| Producteur             | `PaymentService` — publié à la réception d'un webhook Stripe `payment_intent.payment_failed`, ou à l'expiration du time-out interne (15 minutes sans capture après création du PaymentIntent).                                                                                                |
+| Topic / exchange       | Exchange `payments.events.v1` (type `topic`) — routing key `payment.failed`.                                                                                                                                                                                                                    |
+| Consommateurs connus   | `TicketService` (rebascule le billet `reserved` vers `cancelled` et libère la place), `NotificationService` (envoie un e-mail d'échec + lien de relance), `WaitingListService` (déclenche la promotion de la première entrée éligible), `AnalyticsService` (incrément des KPI taux d'échec). |
+| Garantie de livraison  | At-least-once. Idempotence par `x-event-id` ; les consommateurs vérifient le statut courant du billet avant action pour gérer les arrivées tardives.                                                                                                                                            |
+| Stratégie de retry     | Backoff exponentiel : 2 s, 10 s, 1 min, 5 min, 30 min. Maximum 5 tentatives. DLQ `payments.events.v1.dlq` ; alerte critique si la DLQ se remplit (>10 messages en 5 min) car cela bloque la libération des places.                                                                              |
+
+##### Schéma JSON du payload
+
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PaymentFailedEvent",
+  "type": "object",
+  "required": ["eventId", "version", "occurredAt", "paymentId", "ticketId", "userId", "supEventId", "amountCents", "currency", "failureReason"],
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Identifiant unique du message (clé de déduplication)."
+    },
+    "version": {
+      "type": "string",
+      "const": "1.0",
+      "description": "Version du contrat d'événement."
+    },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Horodatage ISO 8601 du fait observé."
+    },
+    "paymentId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Identifiant interne du paiement."
+    },
+    "ticketId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Identifiant du billet associé."
+    },
+    "userId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Identifiant du détenteur."
+    },
+    "supEventId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Identifiant de l'événement métier (Event)."
+    },
+    "amountCents": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Montant tenté en centimes."
+    },
+    "currency": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$",
+      "description": "Devise ISO 4217."
+    },
+    "failureReason": {
+      "type": "string",
+      "enum": [
+        "card_declined",
+        "insufficient_funds",
+        "expired_card",
+        "authentication_required",
+        "processing_error",
+        "timeout",
+        "other"
+      ],
+      "description": "Cause normalisée de l'échec (mappée depuis Stripe)."
+    },
+    "stripeErrorCode": {
+      "type": ["string", "null"],
+      "description": "Code d'erreur natif Stripe pour observabilité."
+    },
+    "retryable": {
+      "type": "boolean",
+      "description": "Indique si une nouvelle tentative côté utilisateur est pertinente."
+    },
+    "correlationId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Corrélation de bout en bout (propagation W3C trace)."
+    }
+  },
+  "additionalProperties": false
+}
+```
