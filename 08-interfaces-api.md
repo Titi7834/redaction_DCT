@@ -1,8 +1,10 @@
 ## §8 — Interfaces & contrats d'API
 
+##### Fait par Tom LEPRIEUR, Arthur L'AFFETER et Tiago DA COSTA
+
 ### Tableau synoptique des endpoints REST
 
-Toutes les routes sont préfixées par `/api/v1/`. La colonne « Auth » précise la matière d'authentification exigée : `Public` (aucune), `JWT` (jeton d'accès porteur signé RS256), `JWT + role:organizer`, `JWT + role:admin`, ou `HMAC` (signature `Stripe-Signature` vérifiée côté serveur). La colonne « Codes retour » liste les statuts HTTP attendus pour les cas nominaux et les erreurs métier les plus structurantes (au-delà des erreurs techniques 5xx, qui font l'objet d'un traitement transverse en § 8.2).
+Toutes les routes sont préfixées par `/api/v1/`. La colonne « Auth » précise le mode d'authentification exigé : `Public` (aucune), `JWT` (jeton d'accès porteur signé — algorithme de signature à figer en § 9, hypothèse V1 RS256), `JWT + role:organizer`, `JWT + role:admin`, ou `HMAC` (signature `Stripe-Signature` vérifiée côté serveur). La colonne « Codes retour » liste les statuts HTTP attendus pour les cas nominaux et les erreurs métier les plus structurantes (au-delà des erreurs techniques 5xx, qui font l'objet d'un traitement transverse en § 8.2).
 
 | Méthode | Chemin                                              | Description                                                       | Auth                       | Codes retour                              | Dépendances aval                                  |
 |---------|-----------------------------------------------------|-------------------------------------------------------------------|----------------------------|-------------------------------------------|---------------------------------------------------|
@@ -47,20 +49,20 @@ Toutes les réponses d'erreur respectent `application/problem+json` :
 }
 ```
 
-Le champ `code` est stable et documenté dans le catalogue d'erreurs (§ 8.4). Le `traceId` correspond à l'identifiant W3C `traceparent` propagé par OpenTelemetry, ce qui permet le rapprochement avec les journaux applicatifs.
+Le champ `code` est stable et documenté dans le catalogue d'erreurs (§ 8.4). Le `traceId` correspond à l'identifiant W3C `traceparent` propagé par la couche d'observabilité (outillage à arbitrer en § 10, hypothèse V1 OpenTelemetry), ce qui permet le rapprochement avec les journaux applicatifs.
 
 #### Stratégie de versioning
 
-- Versioning par segment d'URL : `/api/v1/`, `/api/v2/`. Les versions cohabitent au minimum 6 mois après l'annonce de dépréciation.
+- Versioning par segment d'URL : `/api/v1/`, `/api/v2/`. La durée minimale de cohabitation des versions reste à arbitrer (hypothèse V1 : au moins 6 mois après l'annonce de dépréciation, à valider avec le métier).
 - En-tête `Sunset` (RFC 8594) renvoyé sur les routes dépréciées avec la date d'arrêt.
 - Les changements rétro-incompatibles déclenchent une nouvelle version. L'ajout de champs facultatifs reste rétro-compatible.
 
 #### Rate limiting et quotas
 
-- Quota par défaut : 60 requêtes / minute / IP pour les routes publiques, 600 / minute / utilisateur authentifié.
+- Quotas par défaut : ordres de grandeur de quelques dizaines de requêtes/minute/IP pour les routes publiques et de quelques centaines de requêtes/minute/utilisateur authentifié (valeurs précises à régler en exploitation, à confronter au CDC § perf).
 - En-têtes de réponse normalisés : `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset`.
 - Dépassement : code 429 + `Problem Details` (`code: "RATE_LIMITED"`) + en-tête `Retry-After`.
-- Les routes coûteuses (`/events/search`, `/organizer/.../participants.csv`) ont des quotas dédiés stockés dans Redis (compteurs glissants).
+- Les routes coûteuses (`/events/search`, `/organizer/.../participants.csv`) ont des quotas dédiés stockés dans Redis (compteurs glissants), à calibrer après mesure.
 
 #### Justification des choix d'API structurants
 
@@ -72,18 +74,18 @@ Trois décisions de découpage portent une intention métier qu'OpenAPI ne captu
 
 #### Contrats inter-services
 
-Les services internes communiquent via HTTP/gRPC interne ou via RabbitMQ. Les SLA et politiques de résilience suivants sont contractuels — un service consommateur peut s'y appuyer sans demande préalable.
+Les services internes communiquent via HTTP/gRPC interne ou via RabbitMQ. Le tableau ci-dessous formalise les **objectifs cibles** retenus comme hypothèses de dimensionnement V1 — les valeurs précises (latences, timeouts, seuils de circuit breaker) seront ajustées après mesure en pré-production et validées par le CDC § perf et § exploitation.
 
-| Appelant                  | Appelé              | Type     | SLA latence p95 | Timeout client | Retry                                  | Circuit breaker                                        |
-|---------------------------|---------------------|----------|-----------------|----------------|----------------------------------------|--------------------------------------------------------|
-| `TicketService`           | `EventService`      | gRPC     | 80 ms           | 500 ms         | 2 retries, backoff 50 ms / 200 ms      | Ouverture si > 50 % d'échec sur 30 s, half-open 10 s   |
-| `TicketService`           | `PaymentService`    | gRPC     | 120 ms          | 800 ms         | 1 retry idempotent                     | Ouverture si > 30 % d'échec sur 30 s                   |
-| `PaymentService`          | Stripe API          | HTTPS    | 400 ms          | 3 s            | 3 retries exponentiels (1 s, 3 s, 9 s) | Bulkhead 20 connexions max ; circuit ouvert 60 s sur 5xx persistants |
-| `NotificationService`     | Provider e-mail     | HTTPS    | 600 ms          | 5 s            | 5 retries exponentiels                 | Bascule provider secondaire après 10 échecs en 60 s    |
-| `OrganizerDashboardService` | `AnalyticsService` | gRPC     | 200 ms          | 1 s            | 1 retry                                | Dégradation gracieuse : KPI cachés Redis (TTL 5 min)   |
-| Tous les producteurs      | RabbitMQ            | AMQP     | 30 ms publish ack | 1 s          | Outbox pattern + republish job 30 s    | Outbox PostgreSQL en cas d'indisponibilité broker      |
+| Appelant                  | Appelé              | Type     | Objectif latence p95           | Timeout client (hypothèse) | Politique de retry (hypothèse)         | Coupe-circuit (hypothèse)                              |
+|---------------------------|---------------------|----------|--------------------------------|----------------------------|----------------------------------------|--------------------------------------------------------|
+| `TicketService`           | `EventService`      | gRPC     | sub-100 ms                     | quelques centaines de ms   | Quelques retries courts, opération idempotente uniquement | Ouverture sur taux d'échec élevé sur fenêtre courte    |
+| `TicketService`           | `PaymentService`    | gRPC     | sub-200 ms                     | sub-seconde                | Retry unique idempotent                | Ouverture sur taux d'échec élevé sur fenêtre courte    |
+| `PaymentService`          | Stripe API          | HTTPS    | sub-500 ms                     | quelques secondes          | Retries exponentiels (cf. SDK Stripe)  | Bulkhead nombre de connexions ; circuit ouvert sur 5xx persistants |
+| `NotificationService`     | Provider e-mail     | HTTPS    | sub-seconde                    | quelques secondes          | Retries exponentiels avec jitter       | Bascule provider secondaire après seuil d'échec        |
+| `OrganizerDashboardService` | `AnalyticsService` | gRPC     | sub-300 ms                     | sub-seconde                | Retry unique                           | Dégradation gracieuse : KPI servis depuis cache Redis  |
+| Tous les producteurs      | RabbitMQ            | AMQP     | publish ack quasi-immédiat     | sub-seconde                | Outbox pattern + republish job périodique | Outbox PostgreSQL en cas d'indisponibilité broker     |
 
-Les SLA listés sont les engagements internes ; toute consommation au-delà déclenche une alerte SRE et une revue d'architecture conjointe entre les équipes appelante et appelée.
+Les valeurs cibles listées sont des hypothèses internes à valider — toute consommation au-delà déclenchera une alerte exploitation et une revue d'architecture conjointe entre les équipes appelante et appelée.
 
 ### Événements asynchrones
 
@@ -99,8 +101,8 @@ Tous les événements métier sont publiés sur RabbitMQ via des exchanges `topi
 | Producteur             | `TicketService` — publié lorsqu'un billet bascule en statut `confirmed`, soit immédiatement pour les événements gratuits, soit à la réception d'un `payment_intent.succeeded` côté webhook Stripe relayé par `PaymentService`.                                                                       |
 | Topic / exchange       | Exchange `tickets.events.v1` (type `topic`) — routing key `ticket.confirmed`.                                                                                                                                                                                                                          |
 | Consommateurs connus   | `NotificationService` (envoie l'e-mail de confirmation + le PDF du billet), `AnalyticsService` (incrément des compteurs taux de remplissage / CA), `OrganizerDashboardService` (rafraîchit la liste des participants en temps réel), `WaitingListService` (no-op ; ignore mais conservé pour audit). |
-| Garantie de livraison  | At-least-once. Les consommateurs sont idempotents via la clé `x-event-id` (déduplication Redis, TTL 7 jours).                                                                                                                                                                                          |
-| Stratégie de retry     | Backoff exponentiel : 1 s, 5 s, 30 s, 2 min, 10 min, 1 h. Maximum 6 tentatives. Au-delà, message routé vers la DLQ `tickets.events.v1.dlq`, alerte SRE déclenchée si le débit dépasse 5 messages / 10 min.                                                                                            |
+| Garantie de livraison  | At-least-once. Les consommateurs sont idempotents via la clé `x-event-id` (déduplication Redis ; durée de rétention de la clé à aligner avec la fenêtre maximale de retry, hypothèse V1 quelques jours).                                                                                              |
+| Stratégie de retry     | Backoff exponentiel avec jitter sur plusieurs paliers (de l'ordre de la seconde à l'heure), nombre maximal de tentatives à figer en exploitation (hypothèse V1 : ≈ 6). Au-delà, message routé vers la DLQ `tickets.events.v1.dlq` ; alerte exploitation si la DLQ se remplit anormalement (seuil à calibrer). |
 
 ##### Schéma JSON du payload
 
@@ -178,11 +180,11 @@ Tous les événements métier sont publiés sur RabbitMQ via des exchanges `topi
 | Champ                  | Valeur                                                                                                                                                                                                                                                                                          |
 |------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Nom                    | `payment.failed`                                                                                                                                                                                                                                                                                |
-| Producteur             | `PaymentService` — publié à la réception d'un webhook Stripe `payment_intent.payment_failed`, ou à l'expiration du time-out interne (15 minutes sans capture après création du PaymentIntent).                                                                                                |
+| Producteur             | `PaymentService` — publié à la réception d'un webhook Stripe `payment_intent.payment_failed`, ou à l'expiration d'un time-out interne sur le PaymentIntent (durée précise à figer en § 8.4, hypothèse V1 de l'ordre du quart d'heure).                                                          |
 | Topic / exchange       | Exchange `payments.events.v1` (type `topic`) — routing key `payment.failed`.                                                                                                                                                                                                                    |
 | Consommateurs connus   | `TicketService` (rebascule le billet `reserved` vers `cancelled` et libère la place), `NotificationService` (envoie un e-mail d'échec + lien de relance), `WaitingListService` (déclenche la promotion de la première entrée éligible), `AnalyticsService` (incrément des KPI taux d'échec). |
 | Garantie de livraison  | At-least-once. Idempotence par `x-event-id` ; les consommateurs vérifient le statut courant du billet avant action pour gérer les arrivées tardives.                                                                                                                                            |
-| Stratégie de retry     | Backoff exponentiel : 2 s, 10 s, 1 min, 5 min, 30 min. Maximum 5 tentatives. DLQ `payments.events.v1.dlq` ; alerte critique si la DLQ se remplit (>10 messages en 5 min) car cela bloque la libération des places.                                                                              |
+| Stratégie de retry     | Backoff exponentiel avec jitter, nombre maximal de tentatives à figer en exploitation (hypothèse V1 : ≈ 5). DLQ `payments.events.v1.dlq` ; alerte critique sur remplissage anormal de la DLQ — un blocage prolongé empêcherait la libération des places (priorité d'astreinte à arbitrer).      |
 
 ##### Schéma JSON du payload
 
@@ -268,3 +270,16 @@ Tous les événements métier sont publiés sur RabbitMQ via des exchanges `topi
   "additionalProperties": false
 }
 ```
+
+### Cohérence § 6.4 ↔ § 8 (auto-revue)
+
+| Point de contrôle                                                                                                              | État |
+|--------------------------------------------------------------------------------------------------------------------------------|------|
+| Toutes les entités référencées dans les payloads existent au dictionnaire (`User`, `Ticket`, `Event`, `Payment`)               | OK   |
+| Tous les `id` côté API sont en UUID (cohérent avec les PK PostgreSQL UUID v4)                                                  | OK   |
+| Chaque contrainte UNIQUE en base est associée à un 409 documenté côté API (ticket actif unique → 409 sur `POST /tickets`)      | OK   |
+| Aucun champ marqué « Sensibilité RGPD : Oui » ne fuit dans les payloads (les événements ne portent que des `id` et des codes)  | OK   |
+| Webhook Stripe authentifié par HMAC `Stripe-Signature`, jamais par JWT                                                         | OK   |
+| Chaque événement a au moins un consommateur identifié — pas d'événement orphelin                                               | OK   |
+
+> **Note sur les valeurs chiffrées de cette section.** Toutes les valeurs numériques précises (quotas, latences cibles, timeouts, fenêtres de retry, durées de rétention) sont présentées comme des **hypothèses V1**, à confronter au CDC SupEvents (§ perf, § exploitation, § sécurité) et à ajuster après mesure réelle en pré-production.
