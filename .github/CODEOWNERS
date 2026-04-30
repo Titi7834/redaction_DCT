@@ -1,0 +1,73 @@
+# CODEOWNERS — DCT SupEvents
+#
+# Convention :
+#   - 1 owner principal par section, désigné selon l'auteur principal de la rédaction initiale.
+#   - Le groupe complet sert de fallback (règle * en haut) : tout fichier non couvert spécifiquement
+#     déclenche une revue de l'ensemble du groupe.
+#   - Pour chaque ADR, l'owner est l'auteur qui a porté la décision (à défaut, le groupe complet).
+#
+# Référence GitHub : https://docs.github.com/en/repositories/managing-your-repositories-settings-and-security/customizing-your-repository/about-code-owners
+
+# ============================================================
+# Fallback — tout fichier non listé déclenche une revue groupe
+# ============================================================
+*                                   @Titi7834 @R5FR @1Pythor1
+
+# ============================================================
+# Page de garde, glossaire, changelog — owners : groupe entier
+# (changements rares, impact transverse → revue collective requise)
+# ============================================================
+/00-page-garde.md                   @Titi7834 @R5FR @1Pythor1
+/00-glossaire.md                    @Titi7834 @R5FR @1Pythor1
+/CHANGELOG.md                       @Titi7834 @R5FR @1Pythor1
+
+# ============================================================
+# § 6.4 — Vue des données (modèle ER, dictionnaire, RGPD données)
+# Owner principal : Tiago DA COSTA (rédacteur initial diagramme ER + dictionnaire)
+# ============================================================
+/06.4-vue-donnees.md                @Titi7834
+
+# ============================================================
+# § 7 — Modules détaillés
+# Owner principal : Tom LEPRIEUR (rédacteur initial des fiches modules)
+# Co-owner : Arthur L'AFFETER (algorithmes critiques)
+# ============================================================
+/07-modules.md                      @R5FR @1Pythor1
+
+# ============================================================
+# § 8 — Interfaces & contrats d'API
+# Owner principal : Arthur L'AFFETER (rédacteur initial endpoints + événements)
+# ============================================================
+/08-interfaces-api.md               @1Pythor1
+
+# ============================================================
+# § 9 — Exigences transverses (sécurité, perf, RGPD)
+# Owner principal : Tom LEPRIEUR (analyse STRIDE + SLO)
+# Co-owner : Tiago DA COSTA (volet RGPD lié au modèle de données)
+# ============================================================
+/09-exigences-transverses.md        @R5FR @Titi7834
+
+# ============================================================
+# § 10 — Matrice de traçabilité
+# Owner principal : Tiago DA COSTA (rédacteur initial matrice)
+# Tout changement de matrice doit déclencher une revue car elle touche tous les modules
+# ============================================================
+/10-tracabilite.md                  @Titi7834 @R5FR @1Pythor1
+
+# ============================================================
+# ADR — un owner par décision
+# ============================================================
+/docs/adr/README.md                 @Titi7834 @R5FR @1Pythor1
+/docs/adr/template.md               @Titi7834 @R5FR @1Pythor1
+/docs/adr/ADR-001.md                @1Pythor1
+/docs/adr/ADR-002.md                @R5FR
+/docs/adr/ADR-003.md                @Titi7834
+
+# ============================================================
+# Audit qualité & outillage CI — groupe entier
+# (changements impactant la gouvernance documentaire)
+# ============================================================
+/docs/audit-qualite.md              @Titi7834 @R5FR @1Pythor1
+/docs/ci-validation.md              @Titi7834 @R5FR @1Pythor1
+/.github/                           @Titi7834 @R5FR @1Pythor1
+/.markdownlint.json                 @Titi7834 @R5FR @1Pythor1

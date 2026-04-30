@@ -1,0 +1,17 @@
+{
+  "timeout": "5s",
+  "retryOn429": true,
+  "retryCount": 2,
+  "fallbackRetryDelay": "10s",
+  "aliveStatusCodes": [200, 206, 301, 302, 308],
+  "ignorePatterns": [
+    { "pattern": "^http://localhost" },
+    { "pattern": "^https://localhost" }
+  ],
+  "replacementPatterns": [
+    {
+      "pattern": "^/",
+      "replacement": "{{BASEURL}}/"
+    }
+  ]
+}

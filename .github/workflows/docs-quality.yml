@@ -1,0 +1,107 @@
+name: DCT Quality Checks
+
+on:
+  pull_request:
+    paths:
+      - '**/*.md'
+      - '.markdownlint.json'
+      - '.github/workflows/docs-quality.yml'
+  push:
+    branches: [main]
+    paths:
+      - '**/*.md'
+      - '.markdownlint.json'
+
+jobs:
+  markdown-lint:
+    name: Lint Markdown (markdownlint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install markdownlint-cli
+        run: npm install -g markdownlint-cli@0.39.0
+
+      - name: Run markdownlint
+        run: markdownlint '**/*.md' --ignore node_modules --config .markdownlint.json
+
+  link-check:
+    name: Verify Markdown links
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install markdown-link-check
+        run: npm install -g markdown-link-check@3.12.2
+
+      - name: Check links in changed Markdown files
+        shell: bash
+        run: |
+          set -euo pipefail
+          # On PR : ne lint que les fichiers modifiés ; sur push main : lint complet.
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            FILES=$(git diff --name-only --diff-filter=AMR \
+              "origin/${{ github.base_ref }}...HEAD" -- '*.md' || true)
+          else
+            FILES=$(find . -name '*.md' -not -path './node_modules/*' -not -path './.git/*')
+          fi
+          if [ -z "$FILES" ]; then
+            echo "No Markdown file to check."
+            exit 0
+          fi
+          echo "$FILES" | while read -r f; do
+            [ -z "$f" ] && continue
+            echo "==> Checking $f"
+            markdown-link-check --quiet --config .github/link-check-config.json "$f"
+          done
+
+  mermaid-validate:
+    name: Validate Mermaid diagrams
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install mermaid-cli + jq
+        run: |
+          npm install -g @mermaid-js/mermaid-cli@10.9.0
+          sudo apt-get update -qq && sudo apt-get install -y -qq jq
+
+      - name: Extract and render Mermaid blocks
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .mermaid-tmp
+          fail=0
+          # Extrait chaque bloc ```mermaid ... ``` de chaque .md et tente le rendu SVG.
+          for f in $(find . -name '*.md' -not -path './node_modules/*' -not -path './.git/*'); do
+            awk '
+              /^```mermaid/{flag=1; idx++; out=".mermaid-tmp/"FILENAME"__"idx".mmd"; gsub(/[\/.]/,"_",out); next}
+              /^```/{flag=0; next}
+              flag{print > out}
+            ' FILENAME="${f}" "$f" || true
+          done
+          for diag in .mermaid-tmp/*.mmd; do
+            [ -f "$diag" ] || continue
+            echo "==> Rendering $diag"
+            if ! mmdc -i "$diag" -o "${diag%.mmd}.svg" --quiet; then
+              echo "::error file=$diag::Mermaid syntax error"
+              fail=1
+            fi
+          done
+          rm -rf .mermaid-tmp
+          exit $fail

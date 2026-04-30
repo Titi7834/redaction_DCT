@@ -429,5 +429,9 @@ Le broker peut, dans des cas dégradés, re-livrer un message après expiration 
 |---------------------------------------------------------------------------------------------------------------------------------|------|
 | Toutes les entités manipulées (`User`, `RefreshToken`, `Event`, `Ticket`, `Payment`, `Notification`, `WaitingListEntry`) figurent au dictionnaire § 6.4 | OK   |
 | Tous les endpoints listés dans les contrats d'interface figurent au tableau synoptique § 8                                      | OK   |
-| Tous les événements publiés/consommés (`ticket.confirmed`, `ticket.cancelled`, `payment.succeeded`, `payment.failed`, `event.cancelled`) sont documentés ou prévus § 8 | OK (ticket.cancelled à compléter en § 8 lors de l'itération suivante) |
+| Tous les événements publiés/consommés (`ticket.confirmed`, `ticket.cancelled`, `payment.succeeded`, `payment.failed`, `event.cancelled`) sont documentés ou prévus § 8 | OK (`ticket.cancelled` ajouté à la § 8 en TP 1.7 — correctif audit CO3) |
 | Les codes HTTP des tableaux d'erreurs (409, 422, 502, 401, 403) sont cohérents avec les codes annoncés au tableau synoptique § 8 | OK   |
+
+---
+
+*Dernière mise à jour : 2026-04-30*

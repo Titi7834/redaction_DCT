@@ -204,3 +204,7 @@ Trois exigences sont posées en hypothèse V1 (à confronter aux ENF chiffrées 
 | Délai contractuel     | **Immédiat** côté SupEvents (transaction PostgreSQL synchrone). Propagation aux tiers dans les 24 h (asynchrone).                                                                    |
 | Propagation aux tiers | Update du `Customer` Stripe (`name`) via `Stripe.customers.update()` déclenché par un événement interne `user.updated`. Update des contacts SendGrid (ou équivalent) via API. Aucune action manuelle requise. |
 | Traces conservées     | Audit log de la modification : `user_id`, champs modifiés, valeurs avant/après hashées (pas en clair pour les champs sensibles), horodatage, IP source.                              |
+
+---
+
+*Dernière mise à jour : 2026-04-30*

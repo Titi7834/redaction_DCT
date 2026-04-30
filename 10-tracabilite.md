@@ -67,3 +67,7 @@ Aucun module orphelin (servant zéro exigence) n'est identifié. `EventModule` e
 | Toutes les sections DCT citées (§ 6.4, § 7, § 8, § 9.1, § 9.2, § 9.3) existent dans le dépôt                    | OK   |
 | Aucune EF marquée comme couverte ne pointe vers un module ou une section inexistante                            | OK   |
 | Les ENF non couvertes (ENF-06, ENF-08) sont explicitement signalées avec échéance plutôt que masquées            | OK   |
+
+---
+
+*Dernière mise à jour : 2026-04-30*

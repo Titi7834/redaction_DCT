@@ -271,6 +271,87 @@ Tous les événements métier sont publiés sur RabbitMQ via des exchanges `topi
 }
 ```
 
+#### `ticket.cancelled`
+
+##### Fiche descriptive
+
+| Champ                  | Valeur                                                                                                                                                                                                                                                                                                                              |
+|------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Nom                    | `ticket.cancelled`                                                                                                                                                                                                                                                                                                                  |
+| Producteur             | `TicketService` — publié dans trois scénarios : (1) annulation par l'utilisateur (`DELETE /tickets/{id}`), (2) consommation de `payment.failed` sur un billet `reserved` (libération automatique), (3) consommation de `event.cancelled` (annulation en masse).                                                                     |
+| Topic / exchange       | Exchange `tickets.events.v1` (type `topic`) — routing key `ticket.cancelled`.                                                                                                                                                                                                                                                       |
+| Consommateurs connus   | `NotificationService` (envoie un e-mail d'annulation au détenteur), `PaymentService` (déclenche le remboursement Stripe si `reason = user_cancelled` ou `event_cancelled` et que le paiement avait été capturé), `WaitingListService` (promeut la première entrée éligible de la file d'attente), `AnalyticsService` (KPI annulation). |
+| Garantie de livraison  | At-least-once. Idempotence par `x-event-id` ; les consommateurs vérifient le statut courant avant action.                                                                                                                                                                                                                            |
+| Stratégie de retry     | Backoff exponentiel avec jitter ; max tentatives ≈ 6 (hypothèse V1, cohérent avec `ticket.confirmed`). DLQ `tickets.events.v1.dlq` partagée ; alerte exploitation sur remplissage anormal.                                                                                                                                          |
+
+##### Schéma JSON du payload
+
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "TicketCancelledEvent",
+  "type": "object",
+  "required": ["eventId", "version", "occurredAt", "ticketId", "userId", "supEventId", "reason"],
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Identifiant unique du message (clé de déduplication)."
+    },
+    "version": {
+      "type": "string",
+      "const": "1.0",
+      "description": "Version du contrat d'événement."
+    },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Horodatage ISO 8601 du fait observé."
+    },
+    "ticketId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Identifiant du billet annulé."
+    },
+    "userId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Identifiant du détenteur."
+    },
+    "supEventId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Identifiant de l'événement métier (Event)."
+    },
+    "reason": {
+      "type": "string",
+      "enum": ["user_cancelled", "payment_failed", "event_cancelled", "admin_revoked"],
+      "description": "Cause normalisée de l'annulation."
+    },
+    "previousStatus": {
+      "type": "string",
+      "enum": ["reserved", "confirmed"],
+      "description": "Statut du billet juste avant l'annulation (utile pour décider d'un remboursement)."
+    },
+    "refundRequired": {
+      "type": "boolean",
+      "description": "Indique si un remboursement Stripe doit être déclenché par PaymentService."
+    },
+    "paymentId": {
+      "type": ["string", "null"],
+      "format": "uuid",
+      "description": "Identifiant du paiement associé (null si billet gratuit)."
+    },
+    "correlationId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Corrélation de bout en bout (propagation W3C trace)."
+    }
+  },
+  "additionalProperties": false
+}
+```
+
 ### Cohérence § 6.4 ↔ § 8 (auto-revue)
 
 | Point de contrôle                                                                                                              | État |
@@ -283,3 +364,7 @@ Tous les événements métier sont publiés sur RabbitMQ via des exchanges `topi
 | Chaque événement a au moins un consommateur identifié — pas d'événement orphelin                                               | OK   |
 
 > **Note sur les valeurs chiffrées de cette section.** Toutes les valeurs numériques précises (quotas, latences cibles, timeouts, fenêtres de retry, durées de rétention) sont présentées comme des **hypothèses V1**, à confronter au CDC SupEvents (§ perf, § exploitation, § sécurité) et à ajuster après mesure réelle en pré-production.
+
+---
+
+*Dernière mise à jour : 2026-04-30*
