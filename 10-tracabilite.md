@@ -1,6 +1,6 @@
 ## §10 — Matrice de traçabilité
 
-##### Fait par Tom LEPRIEUR, Arthur L'AFFETER et Tiago DA COSTA
+**Fait par Tom LEPRIEUR, Arthur L'AFFETER et Tiago DA COSTA**
 
 Cette section croise les exigences du CDC SupEvents (13 EF + 8 ENF, hypothèse de référencement V1 — la numérotation et l'intitulé exacts sont à aligner sur le CDC officiel) avec les éléments de la DCT produits dans les TP 1.4, 1.5 et 1.6 : modules de la § 7, sections § 6.4 (données), § 8 (API), § 9 (transverses) et ADR du dossier `/docs/adr/`. La matrice se lit dans deux directions : par exigence (vérifier qu'elle est couverte) et par module (vérifier qu'aucun composant n'est orphelin). Les exigences explicitement non couvertes à ce stade sont signalées dans la colonne ADR avec une note de renvoi vers le TP / sprint qui les traitera.
 

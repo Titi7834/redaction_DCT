@@ -1,6 +1,6 @@
 ## §7 — Conception détaillée par module
 
-##### Fait par Tom LEPRIEUR, Arthur L'AFFETER et Tiago DA COSTA
+**Fait par Tom LEPRIEUR, Arthur L'AFFETER et Tiago DA COSTA**
 
 La § 7 zoome à l'intérieur du découpage logique exposé en § 6.1. Trois modules sont détaillés ici : `AuthModule` (transverse), `TicketModule` (cœur métier transactionnel) et `NotificationModule` (orchestrateur asynchrone). Les trois autres modules du projet (`EventModule`, `PaymentModule`, `UserModule`) suivent la même structure et seront documentés en itération suivante. Toutes les valeurs numériques précises (TTL, timeouts, durées d'expiration, seuils de retry) sont des **hypothèses V1**, à confronter au CDC SupEvents et à régler après mesure en pré-production.
 
@@ -61,7 +61,7 @@ Découpage hexagonal : le noyau (`TokenDomainService`) porte la logique de signa
 
 #### Algorithme critique : flow OIDC complet (callback)
 
-```
+```text
 fonction handleOidcCallback(code, state):
     # 1. Validation anti-CSRF : le state doit avoir été émis par nous
     storedState = stateStore.consume(state)            # GET + DEL atomique
@@ -199,7 +199,7 @@ flowchart LR
 
 Le scénario critique est l'arrivée concurrente de N requêtes sur la dernière place disponible. Le pseudo-code ci-dessous applique la stratégie retenue (cf. ADR-001).
 
-```
+```text
 fonction reserveTicket(userId, eventId, idempotencyKey):
     # 1. Idempotence : double-clic → renvoyer le résultat de la 1re tentative
     si idempotencyKey présent:
@@ -346,7 +346,7 @@ Le `Dispatcher` route les événements entrants vers les templates appropriés v
 
 #### Algorithme critique : envoi avec retry et bascule DLQ
 
-```
+```text
 fonction onEvent(message):
     eventId = message.headers["x-event-id"]
     eventName = message.headers["x-event-name"]

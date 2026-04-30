@@ -6,14 +6,21 @@ Ce fichier atteste du fonctionnement du workflow [`.github/workflows/docs-qualit
 
 ### Étape 1 — PR de test « cassée intentionnellement »
 
-Créer une branche `test/ci-validation`, ajouter un fichier `docs/scratch.md` contenant délibérément :
+Créer une branche `test/ci-validation`, ajouter un fichier `docs/scratch.md` contenant délibérément les trois défauts suivants.
 
-1. Un lien externe mort : `[lien mort](https://this-domain-definitely-does-not-exist-12345.test)`.
-2. Un bloc Mermaid invalide :
-   ```mermaid
-   broken syntax that does not parse
-   ```
-3. Une violation markdownlint (ex : titre `H1` dupliqué).
+**Défaut 1 — lien externe mort**
+
+```markdown
+[lien mort](https://this-domain-definitely-does-not-exist-12345.test)
+```
+
+**Défaut 2 — bloc Mermaid invalide**
+
+```mermaid
+broken syntax that does not parse
+```
+
+**Défaut 3 — violation markdownlint** (par exemple, titre `H1` dupliqué dans le même document).
 
 Ouvrir une pull request et vérifier que les **trois jobs** (`markdown-lint`, `link-check`, `mermaid-validate`) **rejettent la PR** avec messages d'erreur détaillés.
 
@@ -21,13 +28,16 @@ Ouvrir une pull request et vérifier que les **trois jobs** (`markdown-lint`, `l
 
 Pousser un commit qui corrige les trois défauts :
 
-1. Corriger ou retirer le lien externe.
-2. Remplacer le bloc Mermaid par une syntaxe valide :
-   ```mermaid
-   flowchart LR
-       A --> B
-   ```
-3. Corriger la duplication de titre.
+- Corriger ou retirer le lien externe mort.
+- Remplacer le bloc Mermaid par une syntaxe valide.
+- Corriger la duplication de titre.
+
+Bloc Mermaid de remplacement :
+
+```mermaid
+flowchart LR
+    A --> B
+```
 
 Vérifier que les trois jobs passent au vert.
 

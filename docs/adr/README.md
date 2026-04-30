@@ -13,6 +13,6 @@ Ce dossier rassemble les ADR (Architecture Decision Records) au format Nygard do
 ## Convention d'usage
 
 - **Numérotation** : séquentielle, jamais réutilisée (`ADR-001`, `ADR-002`, ...).
-- **Format** : voir [`template.md`](template.md). Six rubriques obligatoires : Contexte, Décision, Alternatives envisagées (≥ 2), Conséquences (positives + négatives + dette acceptée), Liens DCT.
+- **Format** : Six rubriques obligatoires : Contexte, Décision, Alternatives envisagées (≥ 2), Conséquences (positives + négatives + dette acceptée), Liens DCT.
 - **Workflow** : tout ADR est ouvert en pull request, revu par au moins un autre rédacteur ou tech lead avant passage au statut `Accepté`.
 - **Liens croisés** : chaque ADR cite explicitement les sections de la DCT (§ 6.4, § 7, § 8, § 9...) qu'il influence ; les sections concernées de la DCT mentionnent l'ADR pertinent.

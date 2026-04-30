@@ -1,6 +1,6 @@
 ## §9 — Exigences transverses
 
-##### Fait par Tom LEPRIEUR, Arthur L'AFFETER et Tiago DA COSTA
+**Fait par Tom LEPRIEUR, Arthur L'AFFETER et Tiago DA COSTA**
 
 Cette section rassemble les exigences qui ne se rattachent pas à une fonctionnalité métier précise mais qui pèsent sur l'ensemble du système : sécurité, performance, conformité RGPD. Toutes les valeurs numériques précises (latences cibles, taux d'erreur, durées de rétention, fenêtres de retry) sont des **hypothèses V1**, à confronter aux exigences ENF du CDC SupEvents et à régler après mesure en pré-production.
 

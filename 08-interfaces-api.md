@@ -1,6 +1,6 @@
 ## §8 — Interfaces & contrats d'API
 
-##### Fait par Tom LEPRIEUR, Arthur L'AFFETER et Tiago DA COSTA
+**Fait par Tom LEPRIEUR, Arthur L'AFFETER et Tiago DA COSTA**
 
 ### Tableau synoptique des endpoints REST
 
